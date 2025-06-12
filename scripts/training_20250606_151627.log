@@ -1,0 +1,8 @@
+2025-06-06 15:16:27,489 - __main__ - INFO - 开始训练脉冲频率检测模型
+2025-06-06 15:16:27,489 - __main__ - INFO - 训练参数: {'model_type': 'standard', 'epochs': 50, 'batch_size': 64, 'learning_rate': 0.001, 'device': 'auto', 'data_path': 'data/', 'output_dir': 'outputs/', 'resume': None, 'seed': 42, 'num_workers': 4, 'val_split': 0.2, 'save_every': 10}
+2025-06-06 15:16:27,491 - __main__ - INFO - 准备数据集...
+2025-06-06 15:16:28,028 - __main__ - INFO - 数据集大小: 10000
+2025-06-06 15:16:28,028 - __main__ - INFO - 训练集大小: 8000, 验证集大小: 2000
+2025-06-06 15:16:28,051 - __main__ - INFO - 初始化 standard 模型...
+2025-06-06 15:16:28,139 - __main__ - INFO - 模型参数数量: 7,105
+2025-06-06 15:16:29,068 - __main__ - ERROR - 训练过程中出现错误: Trainer.__init__() got an unexpected keyword argument 'output_dir'
