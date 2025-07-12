@@ -4,3 +4,4 @@ scipy~=1.15.3
 torchsummary~=1.5.1
 matplotlib~=3.10.0
 pytest~=8.3.4
+nptdms~=1.10.0

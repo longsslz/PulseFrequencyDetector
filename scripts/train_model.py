@@ -101,7 +101,7 @@ def create_data_loaders(config, args, logger):
     logger.info("准备数据集...")
 
     try:
-        dataset = PulseDataset(config)
+        dataset = PulseDataset(config,None,False, args.data_path)
         logger.info(f"数据集大小: {len(dataset)}")
 
         # 数据集分割

@@ -4,8 +4,8 @@ import torch
 from torch.utils.data import Dataset
 from scipy import signal
 from src.config import Config
-from .generator import generate_synthetic_pulse, add_noise_to_signal, add_missing_pulses
-from .preprocessor import normalize_signal
+from .generator import generate_synthetic_pulse, add_noise_to_signal, add_missing_pulses, filter_signal
+from .preprocessor import normalize_signal, load_and_process_tdms, sliding_window_processing, process_tdms_folder
 
 
 class PulseDataset(Dataset):
@@ -35,7 +35,7 @@ class PulseDataset(Dataset):
         if synthetic:
             self.data, self.labels = self._generate_synthetic_data()
         else:
-            self.data, self.labels = self._load_real_data()
+            self.data, self.labels = self._load_real_data(real_data_path)
 
     def _generate_synthetic_data(self):
         """生成合成数据"""
@@ -75,11 +75,13 @@ class PulseDataset(Dataset):
 
         return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
 
-    def _load_real_data(self):
+    def _load_real_data(self,real_data_path):
         """加载真实数据（占位符实现）"""
-        # 在实际应用中，这里会加载真实采集的脉冲信号数据
-        # 由于我们主要使用合成数据，这里返回空数组
-        return np.array([]), np.array([])
+        # 加载真实采集的脉冲信号数据
+        # 处理文件夹中的所有TDMS文件
+        samples, labels = process_tdms_folder(real_data_path, window_size=3)
+
+        return samples, labels
 
     def __len__(self):
         return len(self.data)

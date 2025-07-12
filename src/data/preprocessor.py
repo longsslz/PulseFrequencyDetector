@@ -1,7 +1,9 @@
 # src/data/preprocessor.py
+import os
+
 import numpy as np
 import torch
-
+from nptdms import TdmsFile
 
 def normalize_signal(signal, method='minmax'):
     """
@@ -170,3 +172,142 @@ def create_tensor_from_signal(signal, seq_length=None, step_size=None, device='c
     # 转换为张量
     tensor = torch.tensor(np.array(sequences), dtype=torch.float32, device=device)
     return tensor.unsqueeze(-1)  # (batch, seq_length, 1)
+
+
+def load_and_process_tdms(file_path):
+    """
+    从TDMS文件中提取所有组的波形数据并转换为NumPy数组
+
+    参数:
+        file_path (str): TDMS文件路径
+
+    返回:
+        numpy.ndarray: 三维波形数据，形状为(组数, 通道数, 数据点数)
+    """
+    # 读取TDMS文件
+    tdms_file = TdmsFile.read(file_path)
+    # 存储所有组的时间数据和幅值数据
+    time_arrays = []
+    amplitude_arrays = []
+
+    # 获取所有组
+    groups = tdms_file.groups()
+    num_groups = len(groups)
+
+    # 检查第一个组以确定通道数和数据点数
+    first_group = groups[0]
+
+    num_channels = len(first_group.channels())
+    num_points = len(first_group.channels()[0].data)
+
+    # 创建三维数组 (组数, 通道数, 数据点数)
+    data_3d = np.zeros((num_groups, num_channels, num_points))
+
+    # 填充数据
+    for group_idx, group in enumerate(groups):
+        for channel_idx, channel in enumerate(group.channels()):
+            data_3d[group_idx, channel_idx, :] = channel.data
+
+    return data_3d
+
+
+
+
+def sliding_window_processing(waveform_data, window_size=3):
+    """
+    使用滑动窗口处理波形数据，生成样本
+
+    参数:
+        waveform_data (numpy.ndarray): 三维波形数据，形状为(组数, 通道数, 数据点数)
+        window_size (int): 滑动窗口大小
+
+    返回:
+        numpy.ndarray: 样本数组，形状为(样本数, 窗口大小 × 数据点数)
+    """
+    num_groups = waveform_data.shape[0]
+
+    # 检查是否有足够的数据
+    if num_groups < window_size:
+        raise ValueError(f"数据组数({num_groups})小于窗口大小({window_size})")
+
+    # 计算样本数量
+    num_samples = num_groups - window_size + 1
+
+    # 初始化样本和标签数组
+    samples = np.zeros((num_samples, window_size * waveform_data.shape[2]))
+    #labels = np.zeros(num_samples) if label is None else np.zeros(num_samples, dtype=object)
+
+    # 滑动窗口处理
+    for i in range(num_samples):
+        # 获取当前窗口内的波形组
+        window_groups = waveform_data[i:i + window_size].copy()
+
+        # 获取第一个波形的起始时间作为参考点
+        first_time_start = window_groups[0, 0, 0]
+
+        # 提取时间数据并转换为相对时间
+        time_data = np.zeros((window_size, waveform_data.shape[2]))
+
+        # 将所有波形的时间转换为相对于第一个波形的相对时间
+        for j in range(window_size):
+
+            # 转换为相对于第一个波形的相对时间
+            time_data[j, :] = window_groups[j, 0, :] - first_time_start
+
+        # 存储样本（只包含时间数据）
+        samples[i] = time_data.flatten()
+
+
+    # 归一化处理
+    min_val = np.min(samples, axis=1, keepdims=True)
+    max_val = np.max(samples, axis=1, keepdims=True)
+    samples = (samples - min_val) / (max_val - min_val)
+    return samples
+
+
+def process_tdms_folder(folder_path, window_size=3):
+    """
+    批量处理文件夹中的所有TDMS文件
+
+    参数:
+        folder_path (str): 包含TDMS文件的文件夹路径
+        window_size (int): 滑动窗口大小
+
+    返回:
+        tuple: (样本数组, 标签数组)
+    """
+    all_samples = []
+    all_labels = []
+    for filename in os.listdir(folder_path):
+        if filename.endswith('.tdms'):
+            file_path = os.path.join(folder_path, filename)
+
+            try:
+                # 从文件名提取频率标签
+                frequency = float(os.path.splitext(filename)[0])
+
+                # 加载和处理文件
+                waveform_data = load_and_process_tdms(file_path)
+                # 使用滑动窗口处理数据
+                samples = sliding_window_processing(waveform_data, window_size)
+
+                # 为每个样本创建标签（相同的频率）
+                labels = np.full(samples.shape[0], frequency)
+
+                # 添加到总数据集
+                all_samples.append(samples)
+                all_labels.append(labels)
+
+                print(f"成功处理文件: {filename}, 频率: {frequency}Hz")
+                print(f"生成样本数: {samples.shape[0]}, 时间向量长度: {samples.shape[1]}")
+
+            except Exception as e:
+                print(f"处理文件 {filename} 时出错: {str(e)}")
+
+    # 合并所有样本和标签
+    if all_samples:
+        samples_array = np.concatenate(all_samples, axis=0)
+        labels_array = np.concatenate(all_labels, axis=0)
+        return samples_array, labels_array
+    else:
+        return np.array([]), np.array([])
