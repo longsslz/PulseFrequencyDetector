@@ -1,5 +1,4 @@
 # src/model/model_utils.py
-import os
 import torch
 import torch.onnx
 from torchsummary import summary

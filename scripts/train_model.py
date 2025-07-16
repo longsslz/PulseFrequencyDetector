@@ -47,14 +47,14 @@ def parse_args():
                         help='模型类型 (standard, lite, deep, tcn)')
     parser.add_argument('--epochs', type=int, default=50,
                         help='训练轮数')
-    parser.add_argument('--batch_size', type=int, default=64,
+    parser.add_argument('--batch_size', type=int, default=16,
                         help='批次大小')
     parser.add_argument('--learning_rate', type=float, default=0.001,
                         help='学习率')
     parser.add_argument('--device', type=str, default='cuda',
                         choices=['cpu', 'cuda', 'auto'],
                         help='计算设备 (cpu, cuda, auto)')
-    parser.add_argument('--data_path', type=str, default='data/',
+    parser.add_argument('--data_path', type=str, default='../src/data/2025-7-15',
                         help='数据路径')
     parser.add_argument('--output_dir', type=str, default='outputs/',
                         help='输出目录')
@@ -62,7 +62,7 @@ def parse_args():
                         help='从检查点恢复训练')
     parser.add_argument('--seed', type=int, default=42,
                         help='随机种子')
-    parser.add_argument('--num_workers', type=int, default=4,
+    parser.add_argument('--num_workers', type=int, default=0,
                         help='数据加载器工作进程数')
     parser.add_argument('--val_split', type=float, default=0.2,
                         help='验证集比例')
@@ -99,9 +99,10 @@ def get_device(device_arg):
 def create_data_loaders(config, args, logger):
     """创建数据加载器"""
     logger.info("准备数据集...")
-
+    # 确保使用绝对路径
+    data_path = os.path.abspath(args.data_path)
     try:
-        dataset = PulseDataset(config,None,False, args.data_path)
+        dataset = PulseDataset(config,None,False, data_path, logger)
         logger.info(f"数据集大小: {len(dataset)}")
 
         # 数据集分割

@@ -5,12 +5,14 @@
 """
 
 import argparse
-import time
+
 import torch
-import numpy as np
+
 from src.config import Config
 from src.model import create_model, model_size_in_mb, count_parameters
-from src.training.utils import benchmark_model
+
+
+# from src.training.utils import benchmark_model
 
 
 def parse_args():

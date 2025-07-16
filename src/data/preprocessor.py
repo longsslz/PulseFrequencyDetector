@@ -4,6 +4,10 @@ import os
 import numpy as np
 import torch
 from nptdms import TdmsFile
+# 在文件开头添加
+import glob
+from functools import lru_cache
+import logging
 
 def normalize_signal(signal, method='minmax'):
     """
@@ -173,10 +177,10 @@ def create_tensor_from_signal(signal, seq_length=None, step_size=None, device='c
     tensor = torch.tensor(np.array(sequences), dtype=torch.float32, device=device)
     return tensor.unsqueeze(-1)  # (batch, seq_length, 1)
 
-
-def load_and_process_tdms(file_path):
+@lru_cache(maxsize=32)
+def load_and_process_tdms(file_path, logger):
     """
-    从TDMS文件中提取所有组的波形数据并转换为NumPy数组
+    加载并处理单个TDMS文件
 
     参数:
         file_path (str): TDMS文件路径
@@ -184,33 +188,34 @@ def load_and_process_tdms(file_path):
     返回:
         numpy.ndarray: 三维波形数据，形状为(组数, 通道数, 数据点数)
     """
-    # 读取TDMS文件
-    tdms_file = TdmsFile.read(file_path)
-    # 存储所有组的时间数据和幅值数据
-    time_arrays = []
-    amplitude_arrays = []
+    try:
+        # 读取TDMS文件
+        tdms_file = TdmsFile.read(file_path)
 
-    # 获取所有组
-    groups = tdms_file.groups()
-    num_groups = len(groups)
+        # 获取所有组
+        groups = tdms_file.groups()
+        num_groups = len(groups)
 
-    # 检查第一个组以确定通道数和数据点数
-    first_group = groups[0]
+        if num_groups == 0:
+            logger.warning(f"文件 {file_path} 中没有找到任何组")
+            return np.array([])
+        # 检查第一个组以确定通道数和数据点数
+        first_group = groups[0]
+        num_channels = len(first_group.channels())
+        num_points = len(first_group.channels()[0].data)
 
-    num_channels = len(first_group.channels())
-    num_points = len(first_group.channels()[0].data)
+        # 创建三维数组 (组数, 通道数, 数据点数)
+        data_3d = np.zeros((num_groups, num_channels, num_points))
 
-    # 创建三维数组 (组数, 通道数, 数据点数)
-    data_3d = np.zeros((num_groups, num_channels, num_points))
+        # 填充数据
+        for group_idx, group in enumerate(groups):
+            for channel_idx, channel in enumerate(group.channels()):
+                data_3d[group_idx, channel_idx, :] = channel.data
 
-    # 填充数据
-    for group_idx, group in enumerate(groups):
-        for channel_idx, channel in enumerate(group.channels()):
-            data_3d[group_idx, channel_idx, :] = channel.data
-
-    return data_3d
-
-
+        return data_3d
+    except Exception as e:
+        logger.error(f"处理文件 {file_path} 时出错: {str(e)}")
+        return np.array([])
 
 
 def sliding_window_processing(waveform_data, window_size=3):
@@ -224,6 +229,9 @@ def sliding_window_processing(waveform_data, window_size=3):
     返回:
         numpy.ndarray: 样本数组，形状为(样本数, 窗口大小 × 数据点数)
     """
+    if waveform_data.size == 0:
+        return np.array([])
+
     num_groups = waveform_data.shape[0]
 
     # 检查是否有足够的数据
@@ -265,19 +273,26 @@ def sliding_window_processing(waveform_data, window_size=3):
     return samples
 
 
-def process_tdms_folder(folder_path, window_size=3):
+def process_tdms_folder(folder_path, window_size=3, save_processed=False, logger = None):
     """
-    批量处理文件夹中的所有TDMS文件
+     批量处理文件夹中的所有TDMS文件，返回文件路径列表而不是完整数据
 
     参数:
         folder_path (str): 包含TDMS文件的文件夹路径
         window_size (int): 滑动窗口大小
+        save_processed (bool): 是否保存处理后的数据
 
     返回:
-        tuple: (样本数组, 标签数组)
+        list: 文件信息列表，每个元素为(文件路径, 频率, 样本数)
     """
-    all_samples = []
-    all_labels = []
+
+    file_info = []
+    # 确保文件夹存在
+    if not os.path.exists(folder_path):
+        logger.error(f"文件夹不存在: {folder_path}")
+        return file_info
+
+    # 遍历文件夹中的所有文件
     for filename in os.listdir(folder_path):
         if filename.endswith('.tdms'):
             file_path = os.path.join(folder_path, filename)
@@ -286,28 +301,38 @@ def process_tdms_folder(folder_path, window_size=3):
                 # 从文件名提取频率标签
                 frequency = float(os.path.splitext(filename)[0])
 
-                # 加载和处理文件
-                waveform_data = load_and_process_tdms(file_path)
-                # 使用滑动窗口处理数据
-                samples = sliding_window_processing(waveform_data, window_size)
+                # 处理后的数据保存路径
+                processed_path = os.path.join(folder_path, f"processed_{frequency}.npz")
+                # 如果已存在处理好的数据，直接使用
+                if os.path.exists(processed_path):
+                    # 加载样本数量信息
+                    with np.load(processed_path) as data:
+                        num_samples = data['samples'].shape[0]
+                    print(f"使用预处理的文件: {filename}, 频率: {frequency}Hz, 样本数: {num_samples}")
+                else:
+                    # 加载和处理文件
+                    waveform_data = load_and_process_tdms(file_path, logger)
+                    # 使用滑动窗口处理数据
+                    samples = sliding_window_processing(waveform_data, window_size)
 
-                # 为每个样本创建标签（相同的频率）
-                labels = np.full(samples.shape[0], frequency)
+                    if samples.size == 0:
+                        logger.warning(f"文件 {filename} 滑动窗口处理失败，跳过")
+                        continue
 
-                # 添加到总数据集
-                all_samples.append(samples)
-                all_labels.append(labels)
+                    num_samples = samples.shape[0]
 
-                print(f"成功处理文件: {filename}, 频率: {frequency}Hz")
-                print(f"生成样本数: {samples.shape[0]}, 时间向量长度: {samples.shape[1]}")
+                    if save_processed:
+                        # 保存处理后的数据
+                        np.savez_compressed(processed_path, samples=samples)
+                        print(f"保存处理后的文件: {processed_path}, 样本数: {num_samples}")
+
+                    # 及时释放内存
+                    del waveform_data, samples
+
+                file_info.append((file_path, frequency, num_samples))
+                logger.info(f"处理文件: {filename}, 频率: {frequency}Hz, 样本数: {num_samples}")
 
             except Exception as e:
-                print(f"处理文件 {filename} 时出错: {str(e)}")
+                logger.error(f"处理文件 {filename} 时出错: {str(e)}")
 
-    # 合并所有样本和标签
-    if all_samples:
-        samples_array = np.concatenate(all_samples, axis=0)
-        labels_array = np.concatenate(all_labels, axis=0)
-        return samples_array, labels_array
-    else:
-        return np.array([]), np.array([])
+    return file_info

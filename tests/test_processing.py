@@ -1,4 +1,6 @@
 # tests/test_processing.py
+import time
+
 import pytest
 import numpy as np
 from src.processing import (

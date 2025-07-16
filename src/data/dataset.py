@@ -1,17 +1,29 @@
 # src/data/dataset.py
+import os
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from scipy import signal
-from src.config import Config
-from .generator import generate_synthetic_pulse, add_noise_to_signal, add_missing_pulses, filter_signal
-from .preprocessor import normalize_signal, load_and_process_tdms, sliding_window_processing, process_tdms_folder
 
+from src.data.generator import (
+    generate_synthetic_pulse,
+    add_noise_to_signal,
+    add_missing_pulses,
+    filter_signal,
+)
+from src.data.preprocessor import normalize_signal, load_and_process_tdms, sliding_window_processing
+
+
+def _load_real_data_info(real_data_path, logger):
+    """加载真实数据文件信息"""
+    from src.data.preprocessor import process_tdms_folder
+    # 返回格式: [(文件路径, 频率, 样本数), ...]
+    return process_tdms_folder(real_data_path, window_size=3, save_processed=True, logger = logger)
 
 class PulseDataset(Dataset):
     """用于训练模型的脉冲数据集"""
 
-    def __init__(self, config, num_samples=None, synthetic=True, real_data_path=None):
+    def __init__(self, config, num_samples=None, synthetic=True, real_data_path=None, logger = None):
         """
         初始化数据集
 
@@ -30,19 +42,62 @@ class PulseDataset(Dataset):
         self.seq_length = config.DATA['seq_length']
         self.sampling_rate = config.DATA['sampling_rate']
         self.max_freq = config.DATA['max_freq']
+        self.logger = logger
 
         # 生成或加载数据
         if synthetic:
             self.data, self.labels = self._generate_synthetic_data()
         else:
-            self.data, self.labels = self._load_real_data(real_data_path)
+            # 加载文件信息并预加载所有数据
+            self._preload_real_data()
+
+    def _preload_real_data(self):
+        """预加载所有真实数据并转换为张量"""
+        self.file_info = _load_real_data_info(self.real_data_path, self.logger)
+        self.all_samples = []
+        self.all_labels = []
+
+        # 遍历所有文件加载数据
+        for file_idx, (file_path, frequency, num_samples) in enumerate(self.file_info):
+            # 加载文件数据
+            processed_path = os.path.join(
+                os.path.dirname(file_path),
+                f"processed_{frequency}.npz"
+            )
+
+            if os.path.exists(processed_path):
+                with np.load(processed_path) as data:
+                    samples = data['samples']
+            else:
+                waveform_data = load_and_process_tdms(file_path, self.logger)
+                samples = sliding_window_processing(waveform_data, window_size=3)
+                np.savez_compressed(processed_path, samples=samples)
+
+            # 转换为张量并调整形状
+            samples_tensor = torch.tensor(samples, dtype=torch.float32)
+            # 调整形状: [样本数, 序列长度, 1]
+            samples_tensor = samples_tensor.view(len(samples), -1, 1)
+
+            # 创建对应频率标签
+            labels_tensor = torch.full((len(samples),), frequency, dtype=torch.float32)
+
+            self.all_samples.append(samples_tensor)
+            self.all_labels.append(labels_tensor)
+
+        # 合并所有数据
+        self.data = torch.cat(self.all_samples, dim=0)
+        self.labels = torch.cat(self.all_labels, dim=0)
+        self.total_samples = len(self.data)
+
+        # 清理临时数据
+        del self.all_samples, self.all_labels
 
     def _generate_synthetic_data(self):
-        """生成合成数据"""
-        X = []
-        y = []
+        """生成合成数据并直接转换为张量"""
+        X = torch.zeros(self.num_samples, self.seq_length, 1)
+        y = torch.zeros(self.num_samples)
 
-        for _ in range(self.num_samples):
+        for i in range(self.num_samples):
             # 随机频率
             freq = np.random.uniform(0.5, self.max_freq)
 
@@ -70,25 +125,18 @@ class PulseDataset(Dataset):
             # 归一化信号
             processed_signal = normalize_signal(noisy_signal)
 
-            X.append(processed_signal)
-            y.append(freq)
+            # 存储为张量
+            X[i, :, 0] = torch.tensor(processed_signal, dtype=torch.float32)
+            y[i] = freq
 
-        return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32)
-
-    def _load_real_data(self,real_data_path):
-        """加载真实数据（占位符实现）"""
-        # 加载真实采集的脉冲信号数据
-        # 处理文件夹中的所有TDMS文件
-        samples, labels = process_tdms_folder(real_data_path, window_size=3)
-
-        return samples, labels
+        return X, y
 
     def __len__(self):
-        return len(self.data)
+        return self.num_samples if self.synthetic else self.total_samples
 
     def __getitem__(self, idx):
-        # 返回形状为 (seq_length, 1) 的序列和标量频率值
-        return torch.tensor(self.data[idx].reshape(-1, 1)), torch.tensor(self.labels[idx], dtype=torch.float32)
+        # 直接返回预处理的张量
+        return self.data[idx], self.labels[idx]
 
 
 class RealTimePulseDataset(Dataset):

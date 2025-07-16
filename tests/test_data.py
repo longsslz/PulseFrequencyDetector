@@ -1,6 +1,8 @@
 # tests/test_data.py
 import pytest
 import numpy as np
+import torch
+
 from src.data.dataset import PulseDataset
 from src.data.generator import (
     generate_synthetic_pulse,

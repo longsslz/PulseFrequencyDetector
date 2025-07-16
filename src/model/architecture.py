@@ -149,7 +149,7 @@ class DeepPulseDetector(BasePulseDetector):
         # 深度卷积网络
         self.conv_blocks = nn.ModuleList()
         in_channels = self.input_size
-        conv_channels = [32, 64, 128, 256]
+        conv_channels = [32, 32, 64, 128]
 
         for out_channels in conv_channels:
             self.conv_blocks.append(

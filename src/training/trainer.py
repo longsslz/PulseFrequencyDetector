@@ -6,8 +6,6 @@ import torch
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader
-from src.config import Config
 from src.training.metrics import mean_absolute_error, r_squared
 from src.training.utils import save_model, quantize_model, plot_training_history, plot_predictions_vs_actual
 
