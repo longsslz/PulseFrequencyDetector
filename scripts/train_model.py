@@ -20,7 +20,7 @@ try:
     from src.config import Config
     from src.data.dataset import PulseDataset
     from src.model import create_model
-    from src.training.trainer import Trainer
+    from src.training.trainer import Trainer, OptimizedTrainer
 except ImportError as e:
     print(f"导入错误: {e}")
     print("请确保所有必要的模块都已实现")
@@ -42,9 +42,14 @@ def setup_logging(log_level=logging.INFO):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='训练脉冲频率检测模型')
-    parser.add_argument('--model_type', type=str, default='deep',
-                        choices=['standard', 'lite', 'deep', 'tcn'],
-                        help='模型类型 (standard, lite, deep, tcn)')
+    parser.add_argument('--model_type', type=str, default='light_classifier',
+                        choices=['standard', 'lite', 'deep', 'tcn', 'classifier', 'enhanced_classifier', 'light_classifier'],
+                        help='模型类型 (standard, lite, deep, tcn, classifier, enhanced_classifier, light_classifier)')
+    # 新增任务类型参数
+    parser.add_argument('--task_type', type=str, default='classification',
+                        choices=['regression', 'classification'],
+                        help='任务类型：回归(regression)或分类(classification)')
+
     parser.add_argument('--epochs', type=int, default=50,
                         help='训练轮数')
     parser.add_argument('--batch_size', type=int, default=16,
@@ -54,7 +59,7 @@ def parse_args():
     parser.add_argument('--device', type=str, default='cuda',
                         choices=['cpu', 'cuda', 'auto'],
                         help='计算设备 (cpu, cuda, auto)')
-    parser.add_argument('--data_path', type=str, default='../src/data/2025-7-15',
+    parser.add_argument('--data_path', type=str, default='../src/data/2025-7-26',
                         help='数据路径')
     parser.add_argument('--output_dir', type=str, default='outputs/',
                         help='输出目录')
@@ -102,7 +107,7 @@ def create_data_loaders(config, args, logger):
     # 确保使用绝对路径
     data_path = os.path.abspath(args.data_path)
     try:
-        dataset = PulseDataset(config,None,False, data_path, logger)
+        dataset = PulseDataset(config, None, False, data_path, logger)
         logger.info(f"数据集大小: {len(dataset)}")
 
         # 数据集分割
@@ -163,6 +168,7 @@ def main():
         config.TRAINING['epochs'] = args.epochs
         config.TRAINING['batch_size'] = args.batch_size
         config.TRAINING['learning_rate'] = args.learning_rate
+        config.TRAINING['task_type'] = args.task_type
 
         # 创建数据加载器
         train_loader, val_loader, dataset = create_data_loaders(config, args, logger)
@@ -193,10 +199,14 @@ def main():
             patience=10
         )
 
-        criterion = torch.nn.MSELoss()
+        # 选择损失函数
+        if args.task_type == 'classification':
+            criterion = torch.nn.CrossEntropyLoss()
+        else:
+            criterion = torch.nn.MSELoss()
 
         # 创建训练器
-        trainer = Trainer(
+        trainer =  Trainer(
             model=model,
             train_loader=train_loader,
             val_loader=val_loader,
@@ -214,7 +224,7 @@ def main():
 
         # 开始训练
         logger.info("开始训练...")
-        best_val_loss = trainer.train()
+        best_model = trainer.train()
 
         # 保存最终模型
         logger.info("保存最终模型...")

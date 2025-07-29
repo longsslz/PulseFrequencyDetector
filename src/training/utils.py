@@ -3,8 +3,10 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
 from torch import optim
 from torch.quantization import quantize_dynamic
+import seaborn as sns
 
 # from src.training import r_squared, mean_absolute_error
 from .metrics import (
@@ -46,8 +48,22 @@ def quantize_model(model):
     return quantized_model
 
 
-def plot_training_history(train_loss, val_loss, train_mae, val_mae, save_path=None):
-    """绘制训练历史"""
+
+
+def plot_training_history(train_loss, val_loss, train_metric, val_metric,
+                          metric_name='MAE (Hz)', save_path=None):
+    """
+    绘制训练历史图表
+
+    参数:
+        train_loss (list): 训练损失历史
+        val_loss (list): 验证损失历史
+        train_metric (list): 训练指标历史
+        val_metric (list): 验证指标历史
+        metric_name (str): 指标名称（默认为'MAE (Hz)'）
+        save_path (str): 图像保存路径（可选）
+    """
+
     plt.figure(figsize=(12, 10))
 
     # 损失历史
@@ -60,20 +76,22 @@ def plot_training_history(train_loss, val_loss, train_mae, val_mae, save_path=No
     plt.legend()
     plt.grid(True)
 
-    # MAE历史
+    # 指标历史
     plt.subplot(2, 1, 2)
-    plt.plot(train_mae, label='Training MAE')
-    plt.plot(val_mae, label='Validation MAE')
+    plt.plot(train_metric, label=f'Training {metric_name}')
+    plt.plot(val_metric, label=f'Validation {metric_name}')
     plt.xlabel('Epoch')
-    plt.ylabel('MAE (Hz)')
-    plt.title('Training and Validation MAE History')
+    plt.ylabel(metric_name)
+    plt.title(f'Training and Validation {metric_name} History')
     plt.legend()
     plt.grid(True)
 
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path)
+        # 确保目录存在
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=300)
         print(f"Training history plot saved to {save_path}")
     else:
         plt.show()
@@ -158,6 +176,33 @@ def create_learning_rate_scheduler(optimizer, config):
         print(f"Unknown scheduler type: {scheduler_type}. Using no scheduler.")
         return None
 
+
+def plot_confusion_matrix(targets, predictions, class_names, save_path=None):
+    """
+    绘制混淆矩阵（分类任务）
+
+    参数:
+        targets (array): 实际类别数组
+        predictions (array): 预测类别数组
+        class_names (list): 类别名称列表
+        save_path (str): 图像保存路径
+    """
+    # 计算混淆矩阵
+    cm = confusion_matrix(targets, predictions)
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=class_names, yticklabels=class_names)
+
+    plt.xlabel('Predicted Labels')
+    plt.ylabel('True Labels')
+    plt.title('Confusion Matrix')
+
+    if save_path:
+        plt.savefig(save_path, dpi=300)
+        print(f"Confusion matrix plot saved to {save_path}")
+    else:
+        plt.show()
 
 def calculate_model_size(model):
     """计算模型大小（参数数量和文件大小）"""

@@ -1,13 +1,12 @@
 # src/data/preprocessor.py
 import os
+# 在文件开头添加
+from functools import lru_cache
 
 import numpy as np
 import torch
 from nptdms import TdmsFile
-# 在文件开头添加
-import glob
-from functools import lru_cache
-import logging
+
 
 def normalize_signal(signal, method='minmax'):
     """
@@ -177,16 +176,18 @@ def create_tensor_from_signal(signal, seq_length=None, step_size=None, device='c
     tensor = torch.tensor(np.array(sequences), dtype=torch.float32, device=device)
     return tensor.unsqueeze(-1)  # (batch, seq_length, 1)
 
+
 @lru_cache(maxsize=32)
 def load_and_process_tdms(file_path, logger):
     """
-    加载并处理单个TDMS文件
+    加载并处理单个TDMS文件，处理空数据通道并排除没有数据的组
 
     参数:
         file_path (str): TDMS文件路径
+        logger: 日志记录器对象
 
     返回:
-        numpy.ndarray: 三维波形数据，形状为(组数, 通道数, 数据点数)
+        numpy.ndarray: 三维波形数据，形状为(有效组数, 通道数, 数据点数)
     """
     try:
         # 读取TDMS文件
@@ -194,23 +195,60 @@ def load_and_process_tdms(file_path, logger):
 
         # 获取所有组
         groups = tdms_file.groups()
-        num_groups = len(groups)
+        valid_groups = []  # 存储有有效数据的组
 
-        if num_groups == 0:
-            logger.warning(f"文件 {file_path} 中没有找到任何组")
+        # 第一次遍历：筛选有有效数据的组
+        for group in groups:
+            has_valid_data = False
+            for channel in group.channels():
+                if len(channel.data) > 0:
+                    has_valid_data = True
+                    break
+
+            if has_valid_data:
+                valid_groups.append(group)
+
+        num_valid_groups = len(valid_groups)
+
+        if num_valid_groups == 0:
+            logger.warning(f"文件 {file_path} 中没有找到任何有效数据组")
             return np.array([])
-        # 检查第一个组以确定通道数和数据点数
-        first_group = groups[0]
-        num_channels = len(first_group.channels())
-        num_points = len(first_group.channels()[0].data)
 
-        # 创建三维数组 (组数, 通道数, 数据点数)
-        data_3d = np.zeros((num_groups, num_channels, num_points))
+        # 确定最大通道数和最大数据点数
+        max_channels = 0
+        max_points = 0
+
+        for group in valid_groups:
+            channels = group.channels()
+            num_channels = len(channels)
+            max_channels = max(max_channels, num_channels)
+
+            for channel in channels:
+                if len(channel.data) > 0:
+                    max_points = max(max_points, len(channel.data))
+
+        if max_channels == 0 or max_points == 0:
+            logger.warning(f"文件 {file_path} 中没有找到有效数据")
+            return np.array([])
+
+        # 创建三维数组 (有效组数, 最大通道数, 最大数据点数)
+        data_3d = np.zeros((num_valid_groups, max_channels, max_points))
 
         # 填充数据
-        for group_idx, group in enumerate(groups):
-            for channel_idx, channel in enumerate(group.channels()):
-                data_3d[group_idx, channel_idx, :] = channel.data
+        for group_idx, group in enumerate(valid_groups):
+            channels = group.channels()
+
+            for channel_idx, channel in enumerate(channels):
+                if channel_idx >= max_channels:
+                    break
+
+                channel_data = channel.data
+                if len(channel_data) > 0:
+                    # 只填充有效数据部分
+                    end_idx = min(len(channel_data), max_points)
+                    data_3d[group_idx, channel_idx, :end_idx] = channel_data[:end_idx]
+                else:
+                    logger.debug(f"组 {group.name} 通道 {channel.name} 无数据 - 跳过")
 
         return data_3d
     except Exception as e:
@@ -267,9 +305,10 @@ def sliding_window_processing(waveform_data, window_size=3):
 
 
     # 归一化处理
-    min_val = np.min(samples, axis=1, keepdims=True)
-    max_val = np.max(samples, axis=1, keepdims=True)
-    samples = (samples - min_val) / (max_val - min_val)
+    # min_val = np.min(samples, axis=1, keepdims=True)
+    # max_val = np.max(samples, axis=1, keepdims=True)
+    # samples = (samples - min_val) / (max_val - min_val)
+    samples = normalize_signal(samples)
     return samples
 
 

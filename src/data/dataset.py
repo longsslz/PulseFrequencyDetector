@@ -37,12 +37,15 @@ class PulseDataset(Dataset):
         self.synthetic = synthetic
         self.real_data_path = real_data_path
 
+
         # 确定样本数量
         self.num_samples = num_samples or config.DATA['num_samples']
         self.seq_length = config.DATA['seq_length']
         self.sampling_rate = config.DATA['sampling_rate']
         self.max_freq = config.DATA['max_freq']
         self.logger = logger
+
+        self.task_type = config.TRAINING['task_type']
 
         # 生成或加载数据
         if synthetic:
@@ -79,7 +82,14 @@ class PulseDataset(Dataset):
             samples_tensor = samples_tensor.view(len(samples), -1, 1)
 
             # 创建对应频率标签
-            labels_tensor = torch.full((len(samples),), frequency, dtype=torch.float32)
+            if self.task_type == 'classification':
+                # 分类任务 - 将频率转换为类别
+                thresholds = self.config.MODEL['classifier_thresholds']
+                class_idx = int(np.digitize(frequency, thresholds))
+                labels_tensor = torch.full((len(samples),), class_idx, dtype=torch.long)
+            else:
+                # 回归任务
+                labels_tensor = torch.full((len(samples),), frequency, dtype=torch.float32)
 
             self.all_samples.append(samples_tensor)
             self.all_labels.append(labels_tensor)
@@ -127,9 +137,24 @@ class PulseDataset(Dataset):
 
             # 存储为张量
             X[i, :, 0] = torch.tensor(processed_signal, dtype=torch.float32)
-            y[i] = freq
+            if self.task_type == 'classification':
+                # 分类任务 - 将频率转换为类别
+                thresholds = self.config.MODEL['classifier_thresholds']
+                class_idx = int(np.digitize(freq, thresholds))
+                y[i] = class_idx
+            else:
+                # 回归任务
+                y[i] = freq
 
-        return X, y
+        # 转换为张量
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+
+        if self.task_type == 'classification':
+            y_tensor = torch.tensor(y, dtype=torch.long)
+        else:
+            y_tensor = torch.tensor(y, dtype=torch.float32)
+
+        return X_tensor, y_tensor
 
     def __len__(self):
         return self.num_samples if self.synthetic else self.total_samples
